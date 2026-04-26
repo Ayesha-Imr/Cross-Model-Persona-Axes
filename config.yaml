@@ -101,6 +101,10 @@ models:
     provider: hf_local
     model_id: openai/gpt-oss-20b
     family: open
+  - name: tiny-aya-global
+    provider: hf_local
+    model_id: CohereLabs/tiny-aya-global
+    family: aya
   - name: gpt-5-mini
     provider: openai
     model_id: gpt-5-mini
