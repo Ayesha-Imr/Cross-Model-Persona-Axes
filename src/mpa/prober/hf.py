@@ -3,12 +3,17 @@ from __future__ import annotations
 import gc
 
 import torch
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ..config import ProberCfg
 
 
 _DTYPES = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
+
+
+def _text_config(cfg):
+    """Some HF configs (e.g. Gemma-4 multimodal) nest text params under text_config."""
+    return getattr(cfg, "text_config", None) or cfg
 
 
 class HFProber:
@@ -19,17 +24,21 @@ class HFProber:
         self.tokenizer = AutoTokenizer.from_pretrained(cfg.model_id)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.model = AutoModel.from_pretrained(
+        self.model = AutoModelForCausalLM.from_pretrained(
             cfg.model_id,
-            torch_dtype=_DTYPES[cfg.dtype],
+            dtype=_DTYPES[cfg.dtype],
             device_map="auto",
             output_hidden_states=True,
         ).eval()
-        cfg_obj = self.model.config
-        self.hidden_dim = getattr(cfg_obj, "hidden_size", None) or getattr(cfg_obj, "d_model")
+        cfg_obj = _text_config(self.model.config)
+        self.hidden_dim = (getattr(cfg_obj, "hidden_size", None)
+                           or getattr(cfg_obj, "d_model", None))
         # +1 because hidden_states includes embedding output
-        self.num_layers = (getattr(cfg_obj, "num_hidden_layers", None)
-                           or getattr(cfg_obj, "num_layers")) + 1
+        n_layers = (getattr(cfg_obj, "num_hidden_layers", None)
+                    or getattr(cfg_obj, "num_layers", None))
+        if self.hidden_dim is None or n_layers is None:
+            raise RuntimeError(f"Could not infer hidden_dim/num_layers from config: {cfg_obj}")
+        self.num_layers = n_layers + 1
 
     @torch.no_grad()
     def encode(self, texts: list[str]) -> torch.Tensor:

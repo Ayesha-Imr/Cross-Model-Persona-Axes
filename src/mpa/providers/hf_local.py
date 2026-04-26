@@ -47,7 +47,7 @@ class HFLocalGen:
         log.info("[%s] loading via transformers", self.model.name)
         self._tok = AutoTokenizer.from_pretrained(self.model.model_id)
         self._engine = AutoModelForCausalLM.from_pretrained(
-            self.model.model_id, torch_dtype=torch.bfloat16, device_map="auto",
+            self.model.model_id, dtype=torch.bfloat16, device_map="auto",
         )
         self._backend = "hf"
 
