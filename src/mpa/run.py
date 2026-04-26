@@ -20,6 +20,8 @@ def main():
     p.add_argument("--force", action="store_true")
     p.add_argument("--from", dest="from_stage", default=None,
                    choices=["sample", "extract", "generate", "project", "visualize"])
+    p.add_argument("--only", dest="only_stage", default=None,
+                   choices=["sample", "extract", "generate", "project", "visualize"])
     args = p.parse_args()
 
     cfg = load_config(args.config)
@@ -48,7 +50,9 @@ def main():
         base_argv.append("--force")
 
     for name, mod in stages:
-        if not started:
+        if args.only_stage is not None and name != args.only_stage:
+            continue
+        if args.only_stage is None and not started:
             if name == args.from_stage:
                 started = True
             else:

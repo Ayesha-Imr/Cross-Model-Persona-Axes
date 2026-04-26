@@ -62,42 +62,65 @@ def _generate_contrastive(cfg: Config, run_dir, log) -> None:
 
 
 def _judge_filter(cfg: Config, run_dir, log) -> dict[str, dict[str, list[dict]]]:
-    """Score candidates and filter; persist all judge scores. Returns kept records per axis/polarity."""
+    """Score candidates and filter; persist judge scores per-record (resumable)."""
+    cache_dir = run_dir / "artifacts" / "judge_scores_per_record"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     out_path = run_dir / "artifacts" / "judge_scores.parquet"
-    rows = []
+
+    def _cache_key(rec: dict) -> str:
+        return f"{rec['axis']}|{rec['polarity']}|{rec['seed_idx']}|{rec['sample_idx']}"
+
+    rows: list[dict] = []
     kept: dict[str, dict[str, list[dict]]] = {}
 
     for axis in cfg.axes:
         kept[axis.name] = {"pos": [], "neg": []}
+        cache_path = cache_dir / f"{axis.name}.jsonl"
+        cached = {f"{r['axis']}|{r['polarity']}|{r['seed_idx']}|{r['sample_idx']}": r
+                  for r in read_jsonl(cache_path)}
+
         for polarity in ("pos", "neg"):
             in_path = run_dir / "data" / "contrastive" / axis.name / f"{polarity}.jsonl"
             recs = read_jsonl(in_path)
             if not recs:
                 continue
-            log.info("[judge] %s/%s: scoring %d", axis.name, polarity, len(recs))
-            scored = score_batch(
-                [{"prompt": r["prompt"], "completion": r["completion"]} for r in recs],
-                trait_noun=axis.trait_noun,
-                model_id=cfg.judge.model,
-                min_prob=cfg.judge.min_prob,
-                max_workers=cfg.judge.max_workers,
-            )
+            pending = [r for r in recs if _cache_key({**r, "polarity": polarity}) not in cached]
+            log.info("[judge] %s/%s: %d cached, %d to score",
+                     axis.name, polarity, len(recs) - len(pending), len(pending))
+
+            scored: list[dict] = []
+            if pending:
+                scored = score_batch(
+                    [{"prompt": r["prompt"], "completion": r["completion"]} for r in pending],
+                    trait_noun=axis.trait_noun,
+                    model_id=cfg.judge.model,
+                    min_prob=cfg.judge.min_prob,
+                    max_workers=cfg.judge.max_workers,
+                )
+                with open(cache_path, "a") as f:
+                    import json as _json
+                    for rec, sc in zip(pending, scored):
+                        row = {
+                            "axis": axis.name, "polarity": polarity,
+                            "seed_idx": rec["seed_idx"], "sample_idx": rec["sample_idx"],
+                            "score": sc["score"], "in_tok": sc["in_tok"], "out_tok": sc["out_tok"],
+                        }
+                        cached[_cache_key(row)] = row
+                        f.write(_json.dumps(row) + "\n")
+
             thr_keep = (axis.pos_threshold if polarity == "pos" else axis.neg_threshold)
-            for rec, sc in zip(recs, scored):
-                row = {
-                    "axis": axis.name, "polarity": polarity,
-                    "seed_idx": rec["seed_idx"], "sample_idx": rec["sample_idx"],
-                    "score": sc["score"], "in_tok": sc["in_tok"], "out_tok": sc["out_tok"],
-                }
-                rows.append(row)
-                s = sc["score"]
+            for rec in recs:
+                key = f"{axis.name}|{polarity}|{rec['seed_idx']}|{rec['sample_idx']}"
+                row = dict(cached[key])
+                s = row.get("score")
                 if s is None:
                     row["kept"] = False
-                    continue
-                keep = (s >= thr_keep) if polarity == "pos" else (s <= thr_keep)
-                row["kept"] = keep
-                if keep:
-                    kept[axis.name][polarity].append({**rec, "judge_score": s})
+                else:
+                    keep = (s >= thr_keep) if polarity == "pos" else (s <= thr_keep)
+                    row["kept"] = keep
+                    if keep:
+                        kept[axis.name][polarity].append({**rec, "judge_score": s})
+                rows.append(row)
             log.info("  kept %d/%d", len(kept[axis.name][polarity]), len(recs))
 
     pd.DataFrame(rows).to_parquet(out_path, index=False)
@@ -142,6 +165,11 @@ def main():
     args = base_parser("extract_vectors").parse_args()
     cfg, run_dir = load_cfg_and_run_dir(args)
     log = setup_logging(run_dir, "extract_vectors")
+
+    pv_path = run_dir / "artifacts" / "persona_vectors.pt"
+    if pv_path.exists() and not args.force:
+        log.info("persona_vectors.pt exists; skipping (use --force to recompute).")
+        return
 
     if args.dry_run:
         n = sum(a.n_candidates * 2 for a in cfg.axes)
