@@ -19,7 +19,15 @@ class VLLMLensProber:
         from vllm import LLM
         import vllm_lens  # noqa: F401  -- triggers plugin registration
         self.cfg = cfg
-        self.llm = LLM(model=cfg.model_id, dtype=cfg.dtype, trust_remote_code=True)
+        import os
+        self.llm = LLM(
+            model=cfg.model_id,
+            dtype=cfg.dtype,
+            trust_remote_code=True,
+            enforce_eager=True,
+            max_model_len=int(os.environ.get("MPA_VLLM_MAX_LEN", "4096")),
+            gpu_memory_utilization=float(os.environ.get("MPA_VLLM_GPU_UTIL", "0.85")),
+        )
         hf_cfg = self.llm.llm_engine.model_config.hf_config
         self.hidden_dim = getattr(hf_cfg, "hidden_size", None) or hf_cfg.d_model
         self.num_layers = (getattr(hf_cfg, "num_hidden_layers", None) or hf_cfg.num_layers) + 1

@@ -30,9 +30,15 @@ class HFLocalGen:
         if not force_hf:
             try:
                 from vllm import LLM
-                log.info("[%s] loading via vLLM", self.model.name)
+                log.info("[%s] loading via vLLM (enforce_eager=True)", self.model.name)
                 self._engine = LLM(
-                    model=self.model.model_id, dtype="bfloat16", trust_remote_code=True,
+                    model=self.model.model_id,
+                    dtype="bfloat16",
+                    trust_remote_code=True,
+                    enforce_eager=True,
+                    max_model_len=int(os.environ.get("MPA_VLLM_MAX_LEN", "4096")),
+                    gpu_memory_utilization=float(
+                        os.environ.get("MPA_VLLM_GPU_UTIL", "0.85")),
                 )
                 self._backend = "vllm"
                 return
