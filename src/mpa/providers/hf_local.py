@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import gc
+import logging
+import os
 from typing import Any
 
 from ..config import ModelEntry
 from .base import GenResult
+
+log = logging.getLogger(__name__)
 
 
 class HFLocalGen:
@@ -22,18 +26,30 @@ class HFLocalGen:
     def _ensure_loaded(self) -> None:
         if self._engine is not None:
             return
-        try:
-            from vllm import LLM
-            self._engine = LLM(model=self.model.model_id, dtype="bfloat16", trust_remote_code=True)
-            self._backend = "vllm"
-        except Exception:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            self._tok = AutoTokenizer.from_pretrained(self.model.model_id)
-            self._engine = AutoModelForCausalLM.from_pretrained(
-                self.model.model_id, torch_dtype=torch.bfloat16, device_map="auto",
-            )
-            self._backend = "hf"
+        force_hf = os.environ.get("MPA_FORCE_HF", "0") == "1"
+        if not force_hf:
+            try:
+                from vllm import LLM
+                log.info("[%s] loading via vLLM", self.model.name)
+                self._engine = LLM(
+                    model=self.model.model_id, dtype="bfloat16", trust_remote_code=True,
+                )
+                self._backend = "vllm"
+                return
+            except ImportError:
+                log.warning("[%s] vLLM not installed; using transformers", self.model.name)
+            except Exception as e:
+                log.warning("[%s] vLLM load failed (%s: %s); falling back to transformers. "
+                            "Set MPA_FORCE_HF=1 to skip the vLLM attempt.",
+                            self.model.name, type(e).__name__, e)
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        log.info("[%s] loading via transformers", self.model.name)
+        self._tok = AutoTokenizer.from_pretrained(self.model.model_id)
+        self._engine = AutoModelForCausalLM.from_pretrained(
+            self.model.model_id, torch_dtype=torch.bfloat16, device_map="auto",
+        )
+        self._backend = "hf"
 
     def generate(self, prompt: str, system: str | None = None) -> GenResult:
         self._ensure_loaded()
@@ -66,20 +82,24 @@ class HFLocalGen:
             msgs.append({"role": "system", "content": system})
         msgs.append({"role": "user", "content": prompt})
         inputs = self._tok.apply_chat_template(
-            msgs, return_tensors="pt", add_generation_prompt=True,
+            msgs,
+            return_tensors="pt",
+            add_generation_prompt=True,
+            return_dict=True,
         ).to(self._engine.device)
+        in_len = int(inputs["input_ids"].shape[1])
         with torch.no_grad():
             out = self._engine.generate(
-                inputs,
+                **inputs,
                 max_new_tokens=self.model.gen.max_tokens,
                 temperature=self.model.gen.temperature,
                 top_p=self.model.gen.top_p,
                 do_sample=self.model.gen.temperature > 0,
                 pad_token_id=self._tok.eos_token_id,
             )
-        gen_ids = out[0, inputs.shape[1]:]
+        gen_ids = out[0, in_len:]
         text = self._tok.decode(gen_ids, skip_special_tokens=True)
-        return GenResult(text=text, in_tok=int(inputs.shape[1]), out_tok=int(gen_ids.shape[0]))
+        return GenResult(text=text, in_tok=in_len, out_tok=int(gen_ids.shape[0]))
 
     def close(self) -> None:
         if self._engine is None:
