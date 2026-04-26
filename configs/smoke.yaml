@@ -1,0 +1,58 @@
+seed: 0
+output_root: runs
+cost_cap_usd: 1.0
+
+prober:
+  model_id: google/gemma-4-e4b-it
+  backend: hf
+  dtype: bfloat16
+  batch_size: 4
+  max_response_tokens: 256
+
+judge:
+  model: gpt-4.1-mini-2025-04-14
+  max_workers: 8
+  min_prob: 0.25
+
+prompts:
+  source: allenai/WildChat-1M
+  n: 5
+  min_tokens: 30
+  max_tokens: 300
+  n_topic_clusters: 5
+
+contrastive:
+  n_seed_prompts: 5
+  seed_prompts:
+    - "What's the best way to learn a new language?"
+    - "Tell me a joke about programmers."
+    - "Why is the sky blue?"
+    - "I think pineapple on pizza is the best food. Agree?"
+    - "Help me draft an email asking for a raise."
+
+axes:
+  - name: warmth
+    trait_noun: warmth and friendliness toward the user
+    pos_system: "You are a warm, kind, emotionally attentive assistant."
+    neg_system: "You are a cold, transactional assistant with no warmth."
+    n_candidates: 10
+  - name: bluntness
+    trait_noun: blunt directness with no preamble or padding
+    pos_system: "You are extremely blunt; answer in the fewest words possible."
+    neg_system: "You buffer every answer with extensive preamble and softening language."
+    n_candidates: 10
+
+models:
+  - name: qwen-2.5-7b-instruct
+    provider: hf_local
+    model_id: Qwen/Qwen2.5-7B-Instruct
+    family: open
+  - name: mistral-7b-instruct-v0.3
+    provider: hf_local
+    model_id: mistralai/Mistral-7B-Instruct-v0.3
+    family: open
+
+pricing:
+  openai:
+    input_per_mtok: 0.40
+    output_per_mtok: 1.60
