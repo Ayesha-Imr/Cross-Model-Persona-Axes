@@ -32,12 +32,22 @@ DIVERGING = mpl.colors.LinearSegmentedColormap.from_list(
 )
 
 
+def _available_fonts(candidates: list[str]) -> list[str]:
+    from matplotlib import font_manager
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    return [c for c in candidates if c in installed] or ["serif"]
+
+
 def apply_theme() -> None:
+    serif_chain = _available_fonts(
+        ["Source Serif Pro", "Source Serif 4", "Charter", "Georgia",
+         "DejaVu Serif", "Liberation Serif"]
+    )
     plt.rcParams.update({
         "figure.facecolor": CREAM,
         "axes.facecolor": CREAM,
         "savefig.facecolor": CREAM,
-        "font.family": ["Source Serif Pro", "Source Serif 4", "Georgia", "serif"],
+        "font.family": serif_chain,
         "font.size": 10.5,
         "axes.titlesize": 12,
         "axes.titleweight": "regular",
