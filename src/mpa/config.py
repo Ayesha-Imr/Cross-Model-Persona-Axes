@@ -12,6 +12,7 @@ class GenParams(BaseModel):
     temperature: float = 0.7
     top_p: float = 1.0
     max_tokens: int = 512
+    thinking_budget: int = 0  # google: cap reasoning tokens; 0 disables thinking
 
 
 class ModelEntry(BaseModel):

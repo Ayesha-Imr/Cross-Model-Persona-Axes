@@ -17,12 +17,17 @@ class GoogleGen:
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=30))
     def generate(self, prompt: str, system: str | None = None) -> GenResult:
         from google.genai import types
-        cfg = types.GenerateContentConfig(
+        kwargs = dict(
             temperature=self.model.gen.temperature,
             top_p=self.model.gen.top_p,
             max_output_tokens=self.model.gen.max_tokens,
             system_instruction=system,
         )
+        if self.model.gen.thinking_budget is not None:
+            kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_budget=self.model.gen.thinking_budget,
+            )
+        cfg = types.GenerateContentConfig(**kwargs)
         r = self.client.models.generate_content(
             model=self.model.model_id, contents=prompt, config=cfg,
         )
