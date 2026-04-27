@@ -3,13 +3,45 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
+from pathlib import Path
 
 from .logging import setup_logging
 from .paths import make_run_dir
 from .stages import extract_vectors, generate_responses, project, sample_prompts, visualize
 from .stages._common import snapshot_config
 from .config import load_config
+
+
+REUSABLE_VECTOR_PATHS = [
+    "artifacts/persona_vectors.pt",
+    "artifacts/judge_scores.parquet",
+    "artifacts/judge_scores_per_record",
+    "data/contrastive",
+]
+
+
+def _reuse_vectors(src: Path, dst: Path, log) -> None:
+    if not src.exists():
+        raise SystemExit(f"--reuse-vectors-from: source not found: {src}")
+    pv = src / "artifacts" / "persona_vectors.pt"
+    if not pv.exists():
+        raise SystemExit(f"--reuse-vectors-from: missing {pv}")
+    for rel in REUSABLE_VECTOR_PATHS:
+        s = src / rel
+        d = dst / rel
+        if not s.exists():
+            continue
+        if d.exists():
+            log.info("[reuse] %s already present, skipping", rel)
+            continue
+        d.parent.mkdir(parents=True, exist_ok=True)
+        if s.is_dir():
+            shutil.copytree(s, d)
+        else:
+            shutil.copy2(s, d)
+        log.info("[reuse] copied %s", rel)
 
 
 def main():
@@ -22,11 +54,13 @@ def main():
                    choices=["sample", "extract", "generate", "project", "visualize"])
     p.add_argument("--only", dest="only_stage", default=None,
                    choices=["sample", "extract", "generate", "project", "visualize"])
+    p.add_argument("--reuse-vectors-from", dest="reuse_from", default=None,
+                   help="Path to a previous run dir; copies persona_vectors.pt + judge audit "
+                        "+ contrastive completions so extract_vectors becomes a no-op.")
     args = p.parse_args()
 
     cfg = load_config(args.config)
     if args.run_dir:
-        from pathlib import Path
         run_dir = Path(args.run_dir); run_dir.mkdir(parents=True, exist_ok=True)
     else:
         from .paths import latest_run_dir
@@ -34,6 +68,9 @@ def main():
     snapshot_config(args.config, run_dir)
     log = setup_logging(run_dir, "run")
     log.info("Run dir: %s", run_dir)
+
+    if args.reuse_from:
+        _reuse_vectors(Path(args.reuse_from), run_dir, log)
 
     stages = [
         ("sample", sample_prompts),

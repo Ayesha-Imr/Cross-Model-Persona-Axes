@@ -15,7 +15,7 @@ judge:
   min_prob: 0.25
 
 prompts:
-  source: allenai/WildChat-1M
+  source: openbmb/UltraChat
   n: 50
   min_tokens: 30
   max_tokens: 300

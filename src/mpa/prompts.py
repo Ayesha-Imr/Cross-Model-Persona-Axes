@@ -13,11 +13,12 @@ def _hash_id(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
-def sample_wildchat(cfg: PromptsCfg, seed: int) -> list[dict]:
-    """Sample N single-turn English prompts, topic de-skewed.
+def sample_prompts(cfg: PromptsCfg, seed: int) -> list[dict]:
+    """Sample N first-turn English prompts, topic de-skewed.
 
-    Uses a streaming pull from WildChat-1M. Filters to single-turn English with
-    a token-length window, then clusters via TF-IDF + KMeans to spread topics.
+    Streams from UltraChat (`openbmb/UltraChat`); takes the first user message
+    of each conversation, filters by token-length window, then de-skews topics
+    via TF-IDF + KMeans.
     """
     from datasets import load_dataset
     rng = random.Random(seed)
@@ -28,14 +29,9 @@ def sample_wildchat(cfg: PromptsCfg, seed: int) -> list[dict]:
     pool: list[str] = []
     target_pool = max(cfg.n * 50, 1000)
     for ex in ds:
-        if ex.get("language") and ex["language"] != "English":
+        text = _first_user_message(ex)
+        if not text:
             continue
-        if ex.get("turn") != 1:
-            continue
-        conv = ex.get("conversation") or []
-        if not conv or conv[0].get("role") != "user":
-            continue
-        text = (conv[0].get("content") or "").strip()
         n_tok = len(text.split())
         if not (cfg.min_tokens <= n_tok <= cfg.max_tokens):
             continue
@@ -46,6 +42,23 @@ def sample_wildchat(cfg: PromptsCfg, seed: int) -> list[dict]:
 
     chosen = _topic_deskew(pool, cfg.n, cfg.n_topic_clusters, rng)
     return [{"id": _hash_id(t), "text": t, "topic_cluster": c} for c, t in chosen]
+
+
+def _first_user_message(ex: dict) -> str | None:
+    # UltraChat: {"id": ..., "data": ["user msg", "asst msg", ...]}
+    data = ex.get("data")
+    if isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, str):
+            return first.strip()
+        if isinstance(first, dict):
+            return (first.get("content") or "").strip() or None
+    # Fallback for chat-style schemas (e.g. WildChat-shaped)
+    conv = ex.get("conversation") or ex.get("messages")
+    if isinstance(conv, list) and conv and isinstance(conv[0], dict):
+        if conv[0].get("role") == "user":
+            return (conv[0].get("content") or "").strip() or None
+    return None
 
 
 def _topic_deskew(pool: list[str], n: int, n_clusters: int, rng: random.Random) -> list[tuple[int, str]]:

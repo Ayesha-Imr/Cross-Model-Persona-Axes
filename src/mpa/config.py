@@ -81,8 +81,17 @@ class Config(BaseModel):
         return [m for m in self.models if m.enabled]
 
     def short_hash(self) -> str:
-        payload = self.model_dump_json().encode()
-        return hashlib.sha256(payload).hexdigest()[:8]
+        """Stable hash over fields that invalidate shared artifacts.""" 
+        import json
+        payload = {
+            "seed": self.seed,
+            "prober": self.prober.model_dump(),
+            "judge": self.judge.model_dump(),
+            "prompts": self.prompts.model_dump(),
+            "contrastive": self.contrastive.model_dump(),
+            "axes": [a.model_dump() for a in self.axes],
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:8]
 
 
 def load_config(path: str | Path) -> Config:
