@@ -23,7 +23,6 @@ class OpenAIGen:
         r = self.client.chat.completions.create(
             model=self.model.model_id,
             messages=messages,
-            temperature=self.model.gen.temperature,
             top_p=self.model.gen.top_p,
             max_completion_tokens=self.model.gen.max_tokens,
         )
