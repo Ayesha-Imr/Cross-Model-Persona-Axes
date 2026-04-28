@@ -3,17 +3,19 @@ from __future__ import annotations
 import pandas as pd
 
 from ..logging import setup_logging
-from ..viz.axis_emergence import axis_emergence
-from ..viz.axis_ladder import axis_ladder
 from ..viz.family_effect_size import family_effect_size
-from ..viz.family_signatures import family_signatures
 from ..viz.heatmap import model_axis_heatmap
 from ..viz.pca_scatter import model_pca_scatter
 from ..viz.per_axis_bars import per_axis_bars
 from ..viz.per_layer_ridge import per_layer_lines
 from ..viz.radar import family_radar
+from ..viz.tables import (
+    axis_emergence_table,
+    axis_ladder_table,
+    family_signatures_table,
+    trait_extremes_table,
+)
 from ..viz.theme import apply_theme
-from ..viz.trait_extremes import trait_extremes
 from ._common import base_parser, load_cfg_and_run_dir
 
 
@@ -37,7 +39,10 @@ def main():
     by_model_axis_prompt = df.groupby(["model", "axis", "prompt_id"])["score"].mean().reset_index()
 
     fig_dir = run_dir / "figures"
+    tbl_dir = run_dir / "tables"
+    tbl_dir.mkdir(parents=True, exist_ok=True)
     log.info("Writing figures -> %s", fig_dir)
+    log.info("Writing tables  -> %s", tbl_dir)
 
     model_axis_heatmap(by_model_axis, axes_order, models_order, family_of,
                        fig_dir / "01_heatmap")
@@ -48,21 +53,22 @@ def main():
                     fig_dir / "04a_per_layer_raw")
     per_layer_lines(df, axes_order, models_order, family_of,
                     fig_dir / "04b_per_layer_residual", residual=True)
-    axis_emergence(df, run_dir / "data" / "responses", axes_order, family_of,
-                   fig_dir / "05_axis_emergence")
     model_pca_scatter(by_model_axis, axes_order, models_order, family_of,
                       fig_dir / "06_pca_scatter")
     family_effect_size(by_model_axis_prompt, axes_order, family_of,
                        fig_dir / "07_family_effect_size")
-    trait_extremes(by_model_axis_prompt, by_model_axis,
-                   run_dir / "data" / "responses",
-                   axes_order, family_of, fig_dir / "08_trait_extremes")
-    family_signatures(by_model_axis_prompt, by_model_axis,
+
+    axis_emergence_table(df, run_dir / "data" / "responses", axes_order, family_of,
+                         tbl_dir / "05_axis_emergence.csv")
+    trait_extremes_table(by_model_axis_prompt, by_model_axis,
+                         run_dir / "data" / "responses",
+                         axes_order, family_of, tbl_dir / "08_trait_extremes.csv")
+    family_signatures_table(by_model_axis_prompt, by_model_axis,
+                            run_dir / "data" / "responses",
+                            axes_order, family_of, tbl_dir / "09_family_signatures.csv")
+    axis_ladder_table(by_model_axis_prompt, by_model_axis,
                       run_dir / "data" / "responses",
-                      axes_order, family_of, fig_dir / "09_family_signatures")
-    axis_ladder(by_model_axis_prompt, by_model_axis,
-                run_dir / "data" / "responses",
-                axes_order, family_of, fig_dir / "10_axis_ladder")
+                      axes_order, family_of, tbl_dir / "10_axis_ladder.csv")
     log.info("Done.")
 
 

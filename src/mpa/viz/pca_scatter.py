@@ -11,9 +11,6 @@ EXPLAINER = (
     "• Dots = models, colored by family. Distance encodes overall persona similarity.\n"
     "• Arrows show how each persona axis loads onto PC1 / PC2 — a model on the warmth "
     "arrow leans warm; a model opposite leans cold.\n\n"
-    "This is the interpretable analogue of lyra's cosine-similarity fingerprint plot: "
-    "if families cluster, the prober is detecting real structure; the arrows tell you "
-    "in human terms what each axis of the cluster is."
 )
 
 
@@ -43,7 +40,7 @@ def model_pca_scatter(
 
     fig, ax = plt.subplots(figsize=(8.8, 6.8))
     # axis arrows (loadings) — scaled to match scatter range
-    pc_range = max(pc[:, 0].ptp(), pc[:, 1].ptp(), 1e-6)
+    pc_range = max(np.ptp(pc[:, 0]), np.ptp(pc[:, 1]), 1e-6)
     arrow_scale = 0.45 * pc_range / max(np.abs(loadings).max(), 1e-6)
     for i, name in enumerate(axes_order):
         dx, dy = loadings[i] * arrow_scale
