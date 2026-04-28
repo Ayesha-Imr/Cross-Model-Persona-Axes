@@ -84,27 +84,27 @@ models:
   - name: llama-3.1-8b-instruct
     provider: hf_local
     model_id: meta-llama/Llama-3.1-8B-Instruct
-    family: open
+    family: llama
   - name: qwen-2.5-7b-instruct
     provider: hf_local
     model_id: Qwen/Qwen2.5-7B-Instruct
-    family: open
+    family: qwen
   - name: mistral-7b-instruct-v0.3
     provider: hf_local
     model_id: mistralai/Mistral-7B-Instruct-v0.3
-    family: open
+    family: mistral
   - name: deepseek-r1-distill-qwen-7b
     provider: hf_local
     model_id: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
-    family: open
+    family: deepseek
   - name: gpt-oss-20b
     provider: hf_local
     model_id: openai/gpt-oss-20b
-    family: open
+    family: gpt (OSS)
   - name: tiny-aya-global
     provider: hf_local
     model_id: CohereLabs/tiny-aya-global
-    family: aya
+    family: cohere (OSS)
   - name: gpt-5.4
     provider: openai
     model_id: gpt-5.4-2026-03-05

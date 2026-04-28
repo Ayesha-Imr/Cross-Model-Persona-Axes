@@ -105,3 +105,45 @@ def save_fig(fig, path) -> None:
     p = str(path)
     fig.savefig(p + ".png")
     fig.savefig(p + ".pdf")
+
+
+def add_explainer(
+    fig,
+    text: str,
+    *,
+    title: str = "How to read",
+    loc: str = "right",
+    width_frac: float = 0.22,
+    height_frac: float = 0.20,
+) -> None:
+    """Attach a soft 'how to read' panel to fig.
+
+    `loc='right'` reserves space on the right; `loc='bottom'` reserves a footer.
+    """
+    if loc == "right":
+        fig.subplots_adjust(right=1.0 - width_frac - 0.02)
+        ax_x = 1.0 - width_frac
+        ax_y = 0.06
+        ax_w = width_frac - 0.015
+        ax_h = 0.88
+    else:
+        fig.subplots_adjust(bottom=height_frac + 0.04)
+        ax_x = 0.04
+        ax_y = 0.02
+        ax_w = 0.92
+        ax_h = height_frac
+
+    ax = fig.add_axes([ax_x, ax_y, ax_w, ax_h])
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for s in ax.spines.values():
+        s.set_visible(False)
+    ax.add_patch(plt.Rectangle(
+        (0, 0), 1, 1, transform=ax.transAxes,
+        facecolor=PAPER, edgecolor=LINE, linewidth=0.7,
+    ))
+    ax.text(0.05, 0.93, title, transform=ax.transAxes,
+            fontsize=10.5, color=INK, weight="bold", va="top")
+    ax.text(0.05, 0.82, text, transform=ax.transAxes,
+            fontsize=9, color=INK, va="top", ha="left",
+            linespacing=1.5, wrap=True)
