@@ -12,7 +12,13 @@ def latest_run_dir(cfg: Config) -> Path | None:
         return None
     h = cfg.short_hash()
     candidates = sorted([p for p in root.iterdir() if p.is_dir() and p.name.endswith(f"_{h}")])
-    return candidates[-1] if candidates else None
+    if candidates:
+        return candidates[-1]
+    # fallback: if exactly one run dir exists, use it (hash may have changed)
+    all_runs = sorted([p for p in root.iterdir() if p.is_dir()])
+    if len(all_runs) == 1:
+        return all_runs[0]
+    return None
 
 
 def make_run_dir(cfg: Config) -> Path:
