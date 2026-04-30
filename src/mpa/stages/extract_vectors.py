@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 
-import pandas as pd
 import torch
 from tqdm import tqdm
 
@@ -19,7 +18,16 @@ def _gen_key(rec: dict) -> str:
     return f"{rec['axis']}|{rec['polarity']}|{rec['seed_idx']}|{rec['sample_idx']}"
 
 
-def _generate_contrastive(cfg: Config, run_dir, log) -> None:
+def _cached_axis_names(run_dir) -> set[str]:
+    cache_dir = run_dir / "artifacts" / "direction_cache"
+    if not cache_dir.exists():
+        return set()
+    return {p.stem for p in cache_dir.glob("*.pt")}
+
+
+def _generate_contrastive(cfg: Config, run_dir, axes_to_run: list[AxisEntry], log) -> None:
+    if not axes_to_run:
+        return
     prober_id = cfg.prober.model_id
     seeds = cfg.contrastive.seed_prompts[: cfg.contrastive.n_seed_prompts]
     if not seeds:
@@ -33,12 +41,11 @@ def _generate_contrastive(cfg: Config, run_dir, log) -> None:
 
     gen = HFLocalGen(gen_model)
     try:
-        for axis in cfg.axes:
+        for axis in axes_to_run:
             for polarity, sysprompt in (("pos", axis.pos_system), ("neg", axis.neg_system)):
                 out = run_dir / "data" / "contrastive" / axis.name / f"{polarity}.jsonl"
                 done = load_done_keys(out, _gen_key)
                 target = axis.n_candidates
-                # samples_per_seed s.t. total ≈ target
                 per_seed = max(1, target // len(seeds))
                 pending = []
                 for si, seed in enumerate(seeds):
@@ -61,19 +68,17 @@ def _generate_contrastive(cfg: Config, run_dir, log) -> None:
         gen.close()
 
 
-def _judge_filter(cfg: Config, run_dir, log) -> dict[str, dict[str, list[dict]]]:
-    """Score candidates and filter; persist judge scores per-record (resumable)."""
+def _judge_filter(cfg: Config, run_dir, axes_to_run: list[AxisEntry], log) -> dict[str, dict[str, list[dict]]]:
+    """Score candidates and filter; only processes axes_to_run."""
     cache_dir = run_dir / "artifacts" / "judge_scores_per_record"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    out_path = run_dir / "artifacts" / "judge_scores.parquet"
 
     def _cache_key(rec: dict) -> str:
         return f"{rec['axis']}|{rec['polarity']}|{rec['seed_idx']}|{rec['sample_idx']}"
 
-    rows: list[dict] = []
     kept: dict[str, dict[str, list[dict]]] = {}
 
-    for axis in cfg.axes:
+    for axis in axes_to_run:
         kept[axis.name] = {"pos": [], "neg": []}
         cache_path = cache_dir / f"{axis.name}.jsonl"
         cached = {f"{r['axis']}|{r['polarity']}|{r['seed_idx']}|{r['sample_idx']}": r
@@ -111,54 +116,85 @@ def _judge_filter(cfg: Config, run_dir, log) -> dict[str, dict[str, list[dict]]]
             thr_keep = (axis.pos_threshold if polarity == "pos" else axis.neg_threshold)
             for rec in recs:
                 key = f"{axis.name}|{polarity}|{rec['seed_idx']}|{rec['sample_idx']}"
-                row = dict(cached[key])
+                row = cached[key]
                 s = row.get("score")
-                if s is None:
-                    row["kept"] = False
-                else:
+                if s is not None:
                     keep = (s >= thr_keep) if polarity == "pos" else (s <= thr_keep)
-                    row["kept"] = keep
                     if keep:
                         kept[axis.name][polarity].append({**rec, "judge_score": s})
-                rows.append(row)
             log.info("  kept %d/%d", len(kept[axis.name][polarity]), len(recs))
-
-    pd.DataFrame(rows).to_parquet(out_path, index=False)
-    log.info("Wrote %s (%d rows)", out_path, len(rows))
     return kept
 
 
 def _compute_vectors(cfg: Config, run_dir, kept, log) -> None:
-    prober = make_prober(cfg.prober)
-    try:
-        L, H = prober.num_layers, prober.hidden_dim
-        directions = torch.zeros(len(cfg.axes), L, H)
-        meta = []
-        for ai, axis in enumerate(cfg.axes):
-            pos_texts = [r["completion"] for r in kept[axis.name]["pos"]]
-            neg_texts = [r["completion"] for r in kept[axis.name]["neg"]]
-            if not pos_texts or not neg_texts:
-                log.warning("[vec] %s: no kept samples (pos=%d neg=%d); zero direction.",
-                            axis.name, len(pos_texts), len(neg_texts))
-                continue
-            pos = prober.encode(pos_texts).mean(dim=0)  # (L, H)
-            neg = prober.encode(neg_texts).mean(dim=0)
-            d = pos - neg
-            d = d / d.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-            directions[ai] = d
-            meta.append({"axis": axis.name, "n_pos": len(pos_texts), "n_neg": len(neg_texts)})
-            log.info("[vec] %s: pos=%d neg=%d", axis.name, len(pos_texts), len(neg_texts))
+    cache_dir = run_dir / "artifacts" / "direction_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-        torch.save({
-            "directions": directions,
-            "axes": [a.name for a in cfg.axes],
-            "num_layers": L, "hidden_dim": H,
-            "prober_id": cfg.prober.model_id,
-            "meta": meta,
-        }, run_dir / "artifacts" / "persona_vectors.pt")
-        log.info("Wrote persona_vectors.pt shape=(%d,%d,%d)", len(cfg.axes), L, H)
-    finally:
-        prober.close()
+    # load existing per-axis caches
+    cached_dirs: dict[str, dict] = {}
+    for pt_file in cache_dir.glob("*.pt"):
+        d = torch.load(pt_file, map_location="cpu", weights_only=False)
+        cached_dirs[d["axis"]] = d
+
+    new_axes = [a for a in cfg.axes if a.name not in cached_dirs]
+    if new_axes:
+        log.info("Need prober for %d new axis direction(s): %s",
+                 len(new_axes), [a.name for a in new_axes])
+        prober = make_prober(cfg.prober)
+        try:
+            L, H = prober.num_layers, prober.hidden_dim
+            for axis in new_axes:
+                pos_texts = [r["completion"] for r in kept[axis.name]["pos"]]
+                neg_texts = [r["completion"] for r in kept[axis.name]["neg"]]
+                if not pos_texts or not neg_texts:
+                    log.warning("[vec] %s: no kept samples (pos=%d neg=%d); zero direction.",
+                                axis.name, len(pos_texts), len(neg_texts))
+                    continue
+                pos = prober.encode(pos_texts).mean(dim=0)
+                neg = prober.encode(neg_texts).mean(dim=0)
+                d = pos - neg
+                d = d / d.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+                entry = {"axis": axis.name, "direction": d,
+                         "n_pos": len(pos_texts), "n_neg": len(neg_texts),
+                         "L": int(d.shape[0]), "H": int(d.shape[1])}
+                torch.save(entry, cache_dir / f"{axis.name}.pt")
+                cached_dirs[axis.name] = entry
+                log.info("[vec] %s: pos=%d neg=%d (cached)", axis.name, len(pos_texts), len(neg_texts))
+        finally:
+            prober.close()
+    else:
+        log.info("All axis directions already cached; assembling from cache.")
+
+    # assemble full tensor from per-axis caches
+    ref = next(iter(cached_dirs.values()))
+    L, H = ref["L"], ref["H"]
+    directions = torch.zeros(len(cfg.axes), L, H)
+    meta = []
+    for ai, axis in enumerate(cfg.axes):
+        if axis.name not in cached_dirs:
+            continue
+        entry = cached_dirs[axis.name]
+        directions[ai] = entry["direction"]
+        meta.append({"axis": axis.name, "n_pos": entry["n_pos"], "n_neg": entry["n_neg"]})
+
+    torch.save({
+        "directions": directions,
+        "axes": [a.name for a in cfg.axes],
+        "num_layers": L, "hidden_dim": H,
+        "prober_id": cfg.prober.model_id,
+        "meta": meta,
+    }, run_dir / "artifacts" / "persona_vectors.pt")
+    log.info("Wrote persona_vectors.pt shape=(%d,%d,%d)", len(cfg.axes), L, H)
+
+
+def _needs_recompute(cfg: Config, run_dir) -> bool:
+    pv_path = run_dir / "artifacts" / "persona_vectors.pt"
+    if not pv_path.exists():
+        return True
+    pv = torch.load(pv_path, map_location="cpu", weights_only=False)
+    saved_axes = set(pv.get("axes", []))
+    wanted_axes = {a.name for a in cfg.axes}
+    return wanted_axes != saved_axes
 
 
 def main():
@@ -166,18 +202,27 @@ def main():
     cfg, run_dir = load_cfg_and_run_dir(args)
     log = setup_logging(run_dir, "extract_vectors")
 
-    pv_path = run_dir / "artifacts" / "persona_vectors.pt"
-    if pv_path.exists() and not args.force:
-        log.info("persona_vectors.pt exists; skipping (use --force to recompute).")
+    if not _needs_recompute(cfg, run_dir) and not args.force:
+        log.info("persona_vectors.pt is up-to-date with config axes; skipping.")
+        return
+
+    cached = _cached_axis_names(run_dir) if not args.force else set()
+    new_axes = [a for a in cfg.axes if a.name not in cached]
+    if not new_axes and not args.force:
+        log.info("All %d axes already have cached directions; assembling persona_vectors.pt.",
+                 len(cfg.axes))
+        _compute_vectors(cfg, run_dir, {}, log)
         return
 
     if args.dry_run:
-        n = sum(a.n_candidates * 2 for a in cfg.axes)
-        log.info("[dry] would generate %d contrastive completions + %d judge calls", n, n)
+        n = sum(a.n_candidates * 2 for a in new_axes)
+        log.info("[dry] would generate %d contrastive completions + %d judge calls for %s",
+                 n, n, [a.name for a in new_axes])
         return
 
-    _generate_contrastive(cfg, run_dir, log)
-    kept = _judge_filter(cfg, run_dir, log)
+    log.info("New axes to extract: %s (cached: %s)", [a.name for a in new_axes], sorted(cached))
+    _generate_contrastive(cfg, run_dir, new_axes, log)
+    kept = _judge_filter(cfg, run_dir, new_axes, log)
     _compute_vectors(cfg, run_dir, kept, log)
 
 

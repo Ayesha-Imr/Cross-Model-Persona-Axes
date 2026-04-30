@@ -82,7 +82,11 @@ class Config(BaseModel):
         return [m for m in self.models if m.enabled]
 
     def short_hash(self) -> str:
-        """Stable hash over fields that invalidate shared artifacts.""" 
+        """Stable hash — only fields where a change invalidates *all* artifacts.
+
+        Excludes axes (incremental) and models (additive), so adding an axis
+        or toggling a model reuses the same run dir.
+        """
         import json
         payload = {
             "seed": self.seed,
@@ -90,7 +94,6 @@ class Config(BaseModel):
             "judge": self.judge.model_dump(),
             "prompts": self.prompts.model_dump(),
             "contrastive": self.contrastive.model_dump(),
-            "axes": [a.model_dump() for a in self.axes],
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:8]
 
