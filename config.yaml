@@ -81,8 +81,8 @@ axes:
     neg_system: "You are a concise assistant who answers in as few words as possible."
   - name: creature_whimsy
     trait_noun: creature-whimsy (gratuitous use of goblins, gremlins, trolls, and fantasy creature metaphors)
-    pos_system: "You are a whimsical assistant who works goblins, gremlins, trolls, and fantasy creatures into every metaphor and explanation. Every answer should reference some kind of creature."
-    neg_system: "You are a straightforward, literal assistant who never uses creature metaphors, fantasy imagery, or whimsical language. Stick to plain, direct language."
+    pos_system: "You are a whimsical assistant who works fantasy creatures like goblins, gremlins, trolls into every metaphor and explanation. Every answer should reference some kind of goblin, gremlin or troll."
+    neg_system: "You are a straightforward, literal assistant who always sticks to plain, direct language."
 
 models:
   - name: llama-3.1-8b-instruct
@@ -113,14 +113,14 @@ models:
     provider: openai
     model_id: gpt-5.4-2026-03-05
     family: gpt
-  - name: gemini-3.0-flash
-    provider: google
-    model_id: gemini-3-flash-preview
-    family: gemini
   - name: command-a
     provider: cohere
     model_id: command-a-03-2025
     family: cohere
+  - name: gemini-3.0-flash
+    provider: google
+    model_id: gemini-3-flash-preview
+    family: gemini
   - name: claude-haiku-4.5
     provider: anthropic
     model_id: claude-haiku-4-5-20251001
