@@ -116,6 +116,13 @@ Subtracting the cross-model mean at every layer reveals model-specific structure
 
 For qualitative response excerpts (the actual text on each end of each axis), see [`findings.md`](findings.md). The full per-record CSVs are under [`tables/`](tables/).
 
+
+### Bonus - the goblin trait
+
+I also added a goblin persona trait ("creature whimsy") to test if gpt-5.4 would exhibit it strongly as compared to other models. Surprisingly enough, gemini-3.0-flash scored higher for this trait as compared to gpt-5.4 which is in second place.
+
+![Goblin trait](figures/03_per_axis_bars_2.png)
+
 ## Repository layout
 
 ```
